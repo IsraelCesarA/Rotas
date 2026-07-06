@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rotas Ônibus Fortaleza - Localização</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div class="container">
+        <h1>🚌 Rotas Ônibus - Fortaleza</h1>
+
+        <div class="card">
+            <label for="linha">Número da Linha:</label>
+            <input type="number" id="linha" placeholder="Ex: 11, 27, 4, 13..." value="27">
+            <p class="aviso">Digite o número e escolha o sentido</p>
+        </div>
+
+        <div class="card">
+            <label for="sentido">Sentido:</label>
+            <select id="sentido">
+                <option value="Ida">Ida</option>
+                <option value="Volta">Volta</option>
+            </select>
+            <button id="btnCarregar">🚀 Carregar e Desenhar Rota</button>
+            <button id="btnLocalizar" style="background:#16a34a;">📍 Me Localizar</button>
+        </div>
+
+        <div id="infoRota" class="card"></div>
+        <div id="localizacaoInfo" class="card" style="display:none;"></div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
