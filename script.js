@@ -1,9 +1,8 @@
 const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/";
-let map, rotaDesenhada = null, marcadorUsuario = null;
+let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
 const MAX_TENTATIVAS = 6;
 const TEMPO_ESPERA = 1200; 
 
-// Inicializa o mapa focado em Fortaleza
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -11,7 +10,6 @@ function inicializarMapa() {
     }).addTo(map);
 }
 
-// Função de busca adaptada para ler a resposta encapsulada do allOrigins (/get)
 async function buscarComTentativas(url, tentativa = 1) {
     try {
         const resposta = await fetch(url);
@@ -20,7 +18,6 @@ async function buscarComTentativas(url, tentativa = 1) {
         const jsonAllOrigins = await resposta.json();
         
         try {
-            // O conteúdo real retornado pela API original fica dentro de .contents
             return JSON.parse(jsonAllOrigins.contents);
         } catch (e) {
             throw new Error("A API não retornou um JSON válido dentro do payload.");
@@ -35,7 +32,6 @@ async function buscarComTentativas(url, tentativa = 1) {
     }
 }
 
-// Carregar e desenhar rota no mapa
 async function carregarRota() {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
@@ -53,20 +49,17 @@ async function carregarRota() {
     infoDiv.className = "card";
 
     try {
-        // Utilizando o endpoint /get para evitar completamente problemas de CORS no GitHub Pages
         const urlProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
         const dados = await buscarComTentativas(urlProxy);
         
         console.log("Dados brutos recebidos:", dados);
 
-        // Tratamento para encontrar a lista de pontos dentro do objeto retornado
         const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
 
         if (!Array.isArray(listaPontos)) {
             throw new Error("O formato dos dados não é uma lista válida de itinerários.");
         }
 
-        // Filtro condicional por sentido (Ida/Volta) tolerante a maiúsculas
         const pontosFiltrados = listaPontos.filter(ponto => 
             ponto.sentido && ponto.sentido.toLowerCase() === sentido.toLowerCase()
         );
@@ -77,26 +70,21 @@ async function carregarRota() {
             return;
         }
 
-        // Mapeamento e parsing das coordenadas geográficas
         const coordenadas = pontosFiltrados.map(ponto => [
             parseFloat(ponto.latitude), 
             parseFloat(ponto.longitude)
         ]);
 
-        // Remove a rota anterior se ela já existir no mapa
         if (rotaDesenhada) map.removeLayer(rotaDesenhada);
 
-        // Desenha a nova linha de trajeto
         rotaDesenhada = L.polyline(coordenadas, {
             color: '#2563eb',
             weight: 5,
             opacity: 0.9
         }).addTo(map);
 
-        // Ajusta o zoom do mapa para enquadrar a rota inteira perfeitamente
         map.fitBounds(rotaDesenhada.getBounds(), { padding: [20, 20] });
 
-        // Cálculo analítico da distância acumulada em quilômetros (Fórmula de Haversine)
         let distanciaKm = 0;
         const raioTerra = 6371;
         for (let i = 1; i < coordenadas.length; i++) {
@@ -126,7 +114,6 @@ async function carregarRota() {
     }
 }
 
-// Obtém a geolocalização atual do usuário via GPS do dispositivo
 function localizarUsuario() {
     const infoLocal = document.getElementById("localizacaoInfo");
     const botao = document.getElementById("btnLocalizar");
@@ -137,31 +124,43 @@ function localizarUsuario() {
         return;
     }
 
-    botao.textContent = "⏳ Obtendo localização...";
-    botao.disabled = true;
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        botao.textContent = "📍 Me Localizar";
+        botao.style.background = "#16a34a";
+        infoLocal.innerHTML += `<p class="aviso">🛑 Rastreamento pausado.</p>`;
+        return;
+    }
+
+    botao.textContent = "🔄 Rastreando... (Clique para Parar)";
+    botao.style.background = "#d97706"; 
     infoLocal.style.display = "none";
 
-    navigator.geolocation.getCurrentPosition(
+    watchId = navigator.geolocation.watchPosition(
         (posicao) => {
             const lat = posicao.coords.latitude.toFixed(5);
             const lng = posicao.coords.longitude.toFixed(5);
             const precisao = (posicao.coords.accuracy / 1000).toFixed(2);
 
-            if (marcadorUsuario) map.removeLayer(marcadorUsuario);
-
-            marcadorUsuario = L.marker([lat, lng], {
-                title: "Você está aqui",
-                icon: L.icon({
-                    iconUrl: 'https://cdn-icons-png.flaticon.com/32/149/149060.png',
-                    iconSize: [32, 32],
-                    iconAnchor: [16, 32]
-                })
-            }).addTo(map).bindPopup(`<strong>Você está aqui</strong><br>Lat: ${lat}<br>Lon: ${lng}`).openPopup();
+            if (marcadorUsuario) {
+                marcadorUsuario.setLatLng([lat, lng]);
+                marcadorUsuario.getPopup().setContent(`<strong>Você está aqui</strong><br>Lat: ${lat}<br>Lon: ${lng}`);
+            } else {
+                marcadorUsuario = L.marker([lat, lng], {
+                    title: "Você está aqui",
+                    icon: L.icon({
+                        iconUrl: 'https://cdn-icons-png.flaticon.com/32/149/149060.png',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 32]
+                    })
+                }).addTo(map).bindPopup(`<strong>Você está aqui</strong><br>Lat: ${lat}<br>Lon: ${lng}`).openPopup();
+            }
 
             map.setView([lat, lng], 15);
 
             infoLocal.innerHTML = `
-                <p class="localizacao">📍 <strong>Sua localização:</strong><br>
+                <p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>
                 Latitude: ${lat} | Longitude: ${lng}<br>
                 Precisão: ~${precisao} metros</p>
             `;
@@ -171,20 +170,19 @@ function localizarUsuario() {
             let mensagem = "Não foi possível obter sua localização.";
             if (erro.code === 1) mensagem = "⚠️ Permissão negada. Ative a localização no navegador.";
             if (erro.code === 2) mensagem = "⚠️ Sinal de GPS indisponível.";
-            if (erro.code === 3) message = "⚠️ Tempo esgotado. Tente novamente.";
+            if (erro.code === 3) mensagem = "⚠️ Tempo esgotado. Tente novamente.";
             infoLocal.innerHTML = `<p class="erro">${mensagem}</p>`;
             infoLocal.style.display = "block";
+            
+            navigator.geolocation.clearWatch(watchId);
+            watchId = null;
+            botao.textContent = "📍 Me Localizar";
+            botao.style.background = "#16a34a";
         },
-        { enableHighAccuracy: true, maximumAge: 10000, timeout: 12000 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
-
-    setTimeout(() => {
-        botao.textContent = "📍 Me Localizar";
-        botao.disabled = false;
-    }, 1500);
 }
 
-// Inicializa os escutadores de eventos ao carregar a janela
 window.onload = () => {
     inicializarMapa();
     document.getElementById("btnCarregar").addEventListener("click", carregarRota);
