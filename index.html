@@ -24,7 +24,15 @@
                 <option value="Volta">Volta</option>
             </select>
             <button id="btnCarregar">🚀 Carregar e Desenhar Rota</button>
-            <button id="btnLocalizar" style="background:#16a34a;">📍 Me Localizar</button>
+            
+            <div class="controle-voz">
+                <label style="margin: 0; display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
+                    <input type="checkbox" id="vozAtiva" checked style="width: 20px; height: 20px;">
+                    🔊 Ativar avisos por voz ao sair da rota
+                </label>
+            </div>
+
+            <button id="btnLocalizar" style="background:#16a34a;">📍 Iniciar Rastreamento</button>
         </div>
 
         <div id="infoRota" class="card" style="display:none;"></div>
@@ -36,4 +44,3 @@
     <script src="script.js"></script>
 </body>
 </html>
- 
