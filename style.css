@@ -38,12 +38,20 @@ label {
     font-size: 16px; 
 }
 
-input, select { 
+input[type="number"], select { 
     width: 100%; 
     padding: 12px; 
     border: 1px solid #cbd5e1; 
     border-radius: 6px; 
     font-size: 16px; 
+}
+
+.controle-voz {
+    margin-top: 16px;
+    padding: 12px;
+    background: #f1f5f9;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
 }
 
 button { 
@@ -76,13 +84,16 @@ button:disabled {
     z-index: 1; 
 }
 
-#infoRota { 
+#infoRota, #localizacaoInfo { 
     padding: 12px; 
-    background: #dbeafe; 
-    border-left: 4px solid #2563eb; 
     border-radius: 4px; 
     display: none; 
     margin-top: 12px; 
+}
+
+#infoRota {
+    background: #dbeafe; 
+    border-left: 4px solid #2563eb; 
 }
 
 .aviso { 
@@ -109,4 +120,3 @@ button:disabled {
     font-size: 14px; 
     color: #991b1b; 
 }
- 
