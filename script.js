@@ -1,4 +1,8 @@
 const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/";
+// Adicionando a sua nova API de controle
+const API_AUDITORIA = "https://api-transporte-rose.vercel.app/api/auditoria/";
+const DATA_TESTE = "2026-07-13"; // Usando a data que sabemos estar preenchida no seu banco
+
 let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
 
 // Variáveis para o controle de desvio de rota
@@ -51,6 +55,78 @@ async function buscarComTentativas(url, tentativa = 1) {
     }
 }
 
+// ==========================================================
+// NOVA FUNÇÃO: Consome a sua API do Vercel e lista a operação
+// ==========================================================
+async function carregarAuditoriaOperacional(numLinha) {
+    const painelAuditoria = document.getElementById("painelAuditoria");
+    if (!painelAuditoria) return; // Se não tiver a div no HTML, ignora.
+
+    painelAuditoria.innerHTML = "<p>⏳ Consultando escala de frota no servidor operacional...</p>";
+    painelAuditoria.style.display = "block";
+
+    try {
+        const resposta = await fetch(`${API_AUDITORIA}${DATA_TESTE}`);
+        const dados = await resposta.json();
+
+        // Filtra apenas as viagens da linha que o usuário digitou
+        const viagensLinha = dados.auditoria.filter(v => v.id_linha == numLinha);
+
+        if (viagensLinha.length === 0) {
+            painelAuditoria.innerHTML = `<p class="erro">ℹ️ Nenhuma operação planejada encontrada para a linha ${numLinha} no dia ${DATA_TESTE}.</p>`;
+            return;
+        }
+
+        const nomeRota = viagensLinha[0].nome_linha;
+        const origem = viagensLinha[0].terminal_saida;
+        const destino = viagensLinha[0].terminal_chegada;
+
+        // Monta uma tabela visual no projeto
+        let html = `
+            <div style="background: #fff; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 15px;">
+                <h3 style="margin-top:0; color:#003366;">📋 Operação: ${numLinha} - ${nomeRota}</h3>
+                <p style="font-size: 14px; color: #555;"><strong>Rota:</strong> ${origem} ➔ ${destino}</p>
+                <div style="max-height: 250px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left;">
+                        <thead style="background: #e9ecef; position: sticky; top: 0;">
+                            <tr>
+                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Saída Programada</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Carro Escalado</th>
+                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+
+        viagensLinha.forEach(v => {
+            let corStatus = "green";
+            let txtStatus = "No Horário";
+
+            if (v.carro_realizado === "NÃO ALOCADO") {
+                corStatus = "red";
+                txtStatus = "Omitido";
+            } else if (v.programado_saida !== v.realizado_saida) {
+                corStatus = "orange";
+                txtStatus = "Divergência";
+            }
+
+            html += `
+                <tr style="border-bottom: 1px solid #eee;">
+                    <td style="padding: 8px;">${v.programado_saida || '-'}</td>
+                    <td style="padding: 8px;"><strong>${v.carro_realizado}</strong></td>
+                    <td style="padding: 8px; color: ${corStatus}; font-weight: bold;">${txtStatus}</td>
+                </tr>
+            `;
+        });
+
+        html += `</tbody></table></div></div>`;
+        painelAuditoria.innerHTML = html;
+
+    } catch (erro) {
+        painelAuditoria.innerHTML = `<p class="erro">❌ Falha ao carregar inteligência operacional: ${erro.message}</p>`;
+    }
+}
+
 async function carregarRota() {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
@@ -69,6 +145,9 @@ async function carregarRota() {
 
     // Reseta o status de rota ao carregar uma nova
     isForaDaRota = false;
+
+    // Dispara a consulta à sua nova API em paralelo
+    carregarAuditoriaOperacional(numLinha);
 
     try {
         const urlProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
