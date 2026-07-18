@@ -13,7 +13,7 @@
 
         <div class="card">
             <label for="linha">Número da Linha:</label>
-            <input type="number" id="linha" placeholder="Ex: 11, 27, 4, 13..." value="27">
+            <input type="number" id="linha" placeholder="Ex: 11, 27, 14, 24..." value="24">
             <p class="aviso">Digite o número e escolha o sentido</p>
         </div>
 
@@ -35,12 +35,9 @@
             <button id="btnLocalizar" style="background:#16a34a;">📍 Iniciar Rastreamento</button>
         </div>
 
-        <!-- Caixas de Informação -->
-        <div id="infoRota" class="card" style="display:none;"></div>
+        <!-- Caixa Limpa para exibir apenas Linha, Nome e Status do Mapa -->
+        <div id="infoRota" class="card" style="display:none; text-align: center;"></div>
         <div id="localizacaoInfo" class="card" style="display:none;"></div>
-        
-        <!-- NOVA CAIXA: Painel da API de Auditoria -->
-        <div id="painelAuditoria" style="display:none; margin-bottom: 20px;"></div>
 
         <!-- Mapa -->
         <div id="map"></div>
