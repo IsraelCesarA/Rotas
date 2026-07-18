@@ -1,16 +1,24 @@
-const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/";
+// ==========================================
+// 1. CONFIGURAÇÕES E LINKS DAS APIs
+// ==========================================
+// Insira aqui o seu link oficial que devolve as coordenadas (lat/lng) da rota.
+// Deixei vazio por enquanto para evitar o erro 408 do link antigo.
+const API_ITINERARIO = "COLOQUE_SEU_LINK_AQUI"; 
+
+// A API Mestra que construímos no Vercel
 const API_AUDITORIA = "https://api-transporte-rose.vercel.app/api/auditoria/";
-const DATA_TESTE = "2026-07-13"; // Dia que contém a operação no banco
+const DATA_TESTE = "2026-07-13"; // A data que possui dados no banco
 
+// ==========================================
+// 2. VARIÁVEIS GLOBAIS
+// ==========================================
 let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
-
-// Variáveis para o controle de desvio de rota
 let isForaDaRota = false;
-const LIMITE_DISTANCIA_METROS = 60; // Margem de erro de 60 metros
+const LIMITE_DISTANCIA_METROS = 60; // Margem de desvio (60 metros)
 
-const MAX_TENTATIVAS = 6;
-const TEMPO_ESPERA = 1200; 
-
+// ==========================================
+// 3. INICIALIZAÇÃO DO MAPA
+// ==========================================
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -18,55 +26,42 @@ function inicializarMapa() {
     }).addTo(map);
 }
 
-// Função responsável por emitir os alertas de voz
+// ==========================================
+// 4. SISTEMA DE VOZ (ALERTAS)
+// ==========================================
 function falar(texto) {
     const checkboxVoz = document.getElementById("vozAtiva");
     if (!checkboxVoz || !checkboxVoz.checked) return;
 
-    // Cancela falas anteriores para não sobrepor áudios
     window.speechSynthesis.cancel();
-    
     const voz = new SpeechSynthesisUtterance(texto);
     voz.lang = 'pt-BR';
-    voz.rate = 1.0; // Velocidade normal
+    voz.rate = 1.0; 
     window.speechSynthesis.speak(voz);
 }
 
-// CORREÇÃO: Função atualizada para usar o proxy novo e ler o JSON direto
-async function buscarComTentativas(url, tentativa = 1) {
-    try {
-        const resposta = await fetch(url);
-        if (!resposta.ok) throw new Error(`Erro HTTP: ${resposta.status}`);
-        
-        return await resposta.json(); 
-        
-    } catch (erro) {
-        if (tentativa < MAX_TENTATIVAS) {
-            console.log(`Tentativa ${tentativa} falhou, tentando novamente...`);
-            await new Promise(resolve => setTimeout(resolve, TEMPO_ESPERA));
-            return buscarComTentativas(url, tentativa + 1);
-        }
-        throw new Error(`Falhou após ${MAX_TENTATIVAS} tentativas. Verifique a conexão com a API.`);
-    }
-}
-
-// Consome a sua API do Vercel e lista a operação
+// ==========================================
+// 5. AUDITORIA OPERACIONAL (A NOSSA API)
+// ==========================================
 async function carregarAuditoriaOperacional(numLinha) {
     const painelAuditoria = document.getElementById("painelAuditoria");
     if (!painelAuditoria) return; 
 
-    painelAuditoria.innerHTML = "<p>⏳ Consultando escala de frota no servidor operacional...</p>";
+    painelAuditoria.innerHTML = "<p>⏳ Consultando inteligência operacional no Supabase...</p>";
     painelAuditoria.style.display = "block";
 
     try {
         const resposta = await fetch(`${API_AUDITORIA}${DATA_TESTE}`);
-        const dados = await resposta.json();
+        
+        if (!resposta.ok) {
+            throw new Error(`Erro no servidor (A tabela alocacao_frota precisa ser criada no banco).`);
+        }
 
-        // Filtra apenas as viagens da linha que o usuário digitou
+        const dados = await resposta.json();
         const viagensLinha = dados.auditoria.filter(v => v.id_linha == numLinha);
 
         if (viagensLinha.length === 0) {
-            painelAuditoria.innerHTML = `<p class="erro">ℹ️ Nenhuma operação planejada encontrada para a linha ${numLinha} no dia ${DATA_TESTE}.</p>`;
+            painelAuditoria.innerHTML = `<p class="erro">ℹ️ Nenhum carro ou horário planejado para a linha ${numLinha} no dia ${DATA_TESTE}.</p>`;
             return;
         }
 
@@ -74,7 +69,6 @@ async function carregarAuditoriaOperacional(numLinha) {
         const origem = viagensLinha[0].terminal_saida;
         const destino = viagensLinha[0].terminal_chegada;
 
-        // Monta uma tabela visual no projeto
         let html = `
             <div style="background: #fff; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 15px;">
                 <h3 style="margin-top:0; color:#003366;">📋 Operação: ${numLinha} - ${nomeRota}</h3>
@@ -116,10 +110,13 @@ async function carregarAuditoriaOperacional(numLinha) {
         painelAuditoria.innerHTML = html;
 
     } catch (erro) {
-        painelAuditoria.innerHTML = `<p class="erro">❌ Falha ao carregar inteligência operacional: ${erro.message}</p>`;
+        painelAuditoria.innerHTML = `<p class="erro">❌ Falha ao carregar auditoria: ${erro.message}. Lembre-se de rodar o arquivo de correção do banco de dados.</p>`;
     }
 }
 
+// ==========================================
+// 6. DESENHO DA ROTA NO MAPA
+// ==========================================
 async function carregarRota() {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
@@ -131,81 +128,75 @@ async function carregarRota() {
         return;
     }
 
-    botao.textContent = "⏳ Carregando...";
+    botao.textContent = "⏳ Processando...";
     botao.disabled = true;
     infoDiv.style.display = "none";
-    infoDiv.className = "card";
 
-    // Reseta o status de rota ao carregar uma nova
     isForaDaRota = false;
 
-    // Dispara a consulta à sua nova API em paralelo
+    // Dispara a auditoria na nossa API sem depender do mapa
     carregarAuditoriaOperacional(numLinha);
 
-    try {
-        // CORREÇÃO: Utilizando o corsproxy.io que não sofre timeout facilmente
-        const urlProxy = `https://corsproxy.io/?${encodeURIComponent(API_ITINERARIO + numLinha)}`;
-        const dados = await buscarComTentativas(urlProxy);
-        
-        const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
+    // Se o usuário ainda não colocou o link do itinerário, avisa mas não quebra o sistema
+    if (API_ITINERARIO === "COLOQUE_SEU_LINK_AQUI") {
+        infoDiv.innerHTML = `<p class="aviso">⚠️ Tabela de operação carregada! Para desenhar a linha azul no mapa, insira a URL correta do itinerário no código JavaScript.</p>`;
+        infoDiv.style.display = "block";
+        botao.textContent = "🚀 Carregar Rota";
+        botao.disabled = false;
+        return;
+    }
 
-        if (!Array.isArray(listaPontos)) {
-            throw new Error("O formato dos dados não é uma lista válida de itinerários.");
-        }
+    try {
+        // Requisição direta (sem proxies problemáticos)
+        const resposta = await fetch(API_ITINERARIO + numLinha);
+        if (!resposta.ok) throw new Error("Erro ao buscar coordenadas da rota.");
+        
+        const dados = await resposta.json();
+        const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
 
         const pontosFiltrados = listaPontos.filter(ponto => 
             ponto.sentido && ponto.sentido.toLowerCase() === sentido.toLowerCase()
         );
 
         if (pontosFiltrados.length === 0) {
-            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para a linha ${numLinha} no sentido ${sentido}.</p>`;
+            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para o sentido ${sentido}.</p>`;
             infoDiv.style.display = "block";
             return;
         }
 
-        const coordenadas = pontosFiltrados.map(ponto => [
-            parseFloat(ponto.latitude), 
-            parseFloat(ponto.longitude)
-        ]);
+        const coordenadas = pontosFiltrados.map(ponto => [parseFloat(ponto.latitude), parseFloat(ponto.longitude)]);
 
         if (rotaDesenhada) map.removeLayer(rotaDesenhada);
 
-        rotaDesenhada = L.polyline(coordenadas, {
-            color: '#2563eb',
-            weight: 5,
-            opacity: 0.9
-        }).addTo(map);
-
+        rotaDesenhada = L.polyline(coordenadas, { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
         map.fitBounds(rotaDesenhada.getBounds(), { padding: [20, 20] });
 
-        infoDiv.innerHTML = `
-            <h3>Linha ${numLinha} - Sentido ${sentido}</h3>
-            <p>Total de pontos base: ${pontosFiltrados.length}</p>
-            <p class="aviso">✅ Rota carregada. Siga a linha azul no mapa.</p>
-        `;
+        infoDiv.innerHTML = `<h3>Linha ${numLinha}</h3><p class="aviso">✅ Rota desenhada com sucesso.</p>`;
         infoDiv.style.display = "block";
 
     } catch (erro) {
-        infoDiv.innerHTML = `<p class="erro">❌ ${erro.message}</p>`;
+        infoDiv.innerHTML = `<p class="erro">❌ Erro no mapa: ${erro.message}</p>`;
         infoDiv.style.display = "block";
     } finally {
-        botao.textContent = "🚀 Carregar e Desenhar Rota";
+        botao.textContent = "🚀 Carregar Rota";
         botao.disabled = false;
     }
 }
 
+// ==========================================
+// 7. RASTREAMENTO GPS (USUÁRIO)
+// ==========================================
 function localizarUsuario() {
     const infoLocal = document.getElementById("localizacaoInfo");
     const botao = document.getElementById("btnLocalizar");
 
     if (!navigator.geolocation) {
-        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado no seu navegador.</p>`;
+        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado.</p>`;
         infoLocal.style.display = "block";
         return;
     }
 
     if (watchId !== null) {
-        // Pausar rastreamento
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
         botao.textContent = "📍 Iniciar Rastreamento";
@@ -215,12 +206,9 @@ function localizarUsuario() {
         return;
     }
 
-    // Iniciar rastreamento
     botao.textContent = "🔄 Rastreando... (Clique para Parar)";
     botao.style.background = "#d97706"; 
     infoLocal.style.display = "none";
-    
-    // Desbloqueia o áudio no navegador com uma mensagem inicial
     falar("Rastreamento iniciado.");
 
     watchId = navigator.geolocation.watchPosition(
@@ -230,36 +218,23 @@ function localizarUsuario() {
             const precisao = (posicao.coords.accuracy / 1000).toFixed(2);
             const latLngAtual = L.latLng(lat, lng);
 
-            // Atualiza marcador no mapa
             if (marcadorUsuario) {
                 marcadorUsuario.setLatLng(latLngAtual);
-                marcadorUsuario.getPopup().setContent(`<strong>Você está aqui</strong>`);
             } else {
-                marcadorUsuario = L.marker(latLngAtual, {
-                    title: "Você está aqui",
-                    icon: L.icon({
-                        iconUrl: 'https://cdn-icons-png.flaticon.com/32/149/149060.png',
-                        iconSize: [32, 32],
-                        iconAnchor: [16, 32]
-                    })
-                }).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
+                marcadorUsuario = L.marker(latLngAtual).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
             }
 
             map.setView(latLngAtual, 16);
 
             let statusRotaHtml = "";
 
-            // Lógica de desvio de rota usando Web Speech API
             if (rotaDesenhada) {
                 const pontosRota = rotaDesenhada.getLatLngs();
                 let menorDistancia = Infinity;
 
-                // Calcula a distância do usuário para o ponto mais próximo da rota
                 for (let i = 0; i < pontosRota.length; i++) {
                     let distanciaPonto = latLngAtual.distanceTo(pontosRota[i]);
-                    if (distanciaPonto < menorDistancia) {
-                        menorDistancia = distanciaPonto;
-                    }
+                    if (distanciaPonto < menorDistancia) menorDistancia = distanciaPonto;
                 }
 
                 if (menorDistancia > LIMITE_DISTANCIA_METROS && !isForaDaRota) {
@@ -275,20 +250,12 @@ function localizarUsuario() {
                     : `<br><strong style="color:#16a34a;">✅ Na rota correta</strong>`;
             }
 
-            infoLocal.innerHTML = `
-                <p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>
-                Precisão: ~${precisao} metros ${statusRotaHtml}</p>
-            `;
+            infoLocal.innerHTML = `<p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>Precisão: ~${precisao} metros ${statusRotaHtml}</p>`;
             infoLocal.style.display = "block";
         },
         (erro) => {
-            let mensagem = "Não foi possível obter sua localização.";
-            if (erro.code === 1) mensagem = "⚠️ Permissão negada. Ative a localização no navegador.";
-            if (erro.code === 2) mensagem = "⚠️ Sinal de GPS indisponível.";
-            if (erro.code === 3) mensagem = "⚠️ Tempo esgotado. Tente novamente.";
-            infoLocal.innerHTML = `<p class="erro">${mensagem}</p>`;
+            infoLocal.innerHTML = `<p class="erro">⚠️ Erro de GPS.</p>`;
             infoLocal.style.display = "block";
-            
             navigator.geolocation.clearWatch(watchId);
             watchId = null;
             botao.textContent = "📍 Iniciar Rastreamento";
@@ -298,6 +265,9 @@ function localizarUsuario() {
     );
 }
 
+// ==========================================
+// 8. EVENTOS INICIAIS
+// ==========================================
 window.onload = () => {
     inicializarMapa();
     document.getElementById("btnCarregar").addEventListener("click", carregarRota);
