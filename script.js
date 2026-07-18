@@ -1,24 +1,12 @@
-// ==========================================
-// 1. CONFIGURAÇÕES E LINKS DAS APIs
-// ==========================================
-// Insira aqui o seu link oficial que devolve as coordenadas (lat/lng) da rota.
-// Deixei vazio por enquanto para evitar o erro 408 do link antigo.
+// Link para puxar as coordenadas (lat/lng)
 const API_ITINERARIO = "COLOQUE_SEU_LINK_AQUI"; 
+// Link da sua API no Vercel (usada apenas para pegar o NOME da rota)
+const API_NOMES = "https://api-transporte-rose.vercel.app/api/programacao/dia/2026-07-13";
 
-// A API Mestra que construímos no Vercel
-const API_AUDITORIA = "https://api-transporte-rose.vercel.app/api/auditoria/";
-const DATA_TESTE = "2026-07-13"; // A data que possui dados no banco
-
-// ==========================================
-// 2. VARIÁVEIS GLOBAIS
-// ==========================================
 let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
 let isForaDaRota = false;
-const LIMITE_DISTANCIA_METROS = 60; // Margem de desvio (60 metros)
+const LIMITE_DISTANCIA_METROS = 60; 
 
-// ==========================================
-// 3. INICIALIZAÇÃO DO MAPA
-// ==========================================
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -26,9 +14,6 @@ function inicializarMapa() {
     }).addTo(map);
 }
 
-// ==========================================
-// 4. SISTEMA DE VOZ (ALERTAS)
-// ==========================================
 function falar(texto) {
     const checkboxVoz = document.getElementById("vozAtiva");
     if (!checkboxVoz || !checkboxVoz.checked) return;
@@ -40,83 +25,6 @@ function falar(texto) {
     window.speechSynthesis.speak(voz);
 }
 
-// ==========================================
-// 5. AUDITORIA OPERACIONAL (A NOSSA API)
-// ==========================================
-async function carregarAuditoriaOperacional(numLinha) {
-    const painelAuditoria = document.getElementById("painelAuditoria");
-    if (!painelAuditoria) return; 
-
-    painelAuditoria.innerHTML = "<p>⏳ Consultando inteligência operacional no Supabase...</p>";
-    painelAuditoria.style.display = "block";
-
-    try {
-        const resposta = await fetch(`${API_AUDITORIA}${DATA_TESTE}`);
-        
-        if (!resposta.ok) {
-            throw new Error(`Erro no servidor (A tabela alocacao_frota precisa ser criada no banco).`);
-        }
-
-        const dados = await resposta.json();
-        const viagensLinha = dados.auditoria.filter(v => v.id_linha == numLinha);
-
-        if (viagensLinha.length === 0) {
-            painelAuditoria.innerHTML = `<p class="erro">ℹ️ Nenhum carro ou horário planejado para a linha ${numLinha} no dia ${DATA_TESTE}.</p>`;
-            return;
-        }
-
-        const nomeRota = viagensLinha[0].nome_linha;
-        const origem = viagensLinha[0].terminal_saida;
-        const destino = viagensLinha[0].terminal_chegada;
-
-        let html = `
-            <div style="background: #fff; border-radius: 8px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-top: 15px;">
-                <h3 style="margin-top:0; color:#003366;">📋 Operação: ${numLinha} - ${nomeRota}</h3>
-                <p style="font-size: 14px; color: #555;"><strong>Rota:</strong> ${origem} ➔ ${destino}</p>
-                <div style="max-height: 250px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left;">
-                        <thead style="background: #e9ecef; position: sticky; top: 0;">
-                            <tr>
-                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Saída Programada</th>
-                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Carro Escalado</th>
-                                <th style="padding: 8px; border-bottom: 2px solid #ccc;">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-        `;
-
-        viagensLinha.forEach(v => {
-            let corStatus = "green";
-            let txtStatus = "No Horário";
-
-            if (v.carro_realizado === "NÃO ALOCADO") {
-                corStatus = "red";
-                txtStatus = "Omitido";
-            } else if (v.programado_saida !== v.realizado_saida) {
-                corStatus = "orange";
-                txtStatus = "Divergência";
-            }
-
-            html += `
-                <tr style="border-bottom: 1px solid #eee;">
-                    <td style="padding: 8px;">${v.programado_saida || '-'}</td>
-                    <td style="padding: 8px;"><strong>${v.carro_realizado}</strong></td>
-                    <td style="padding: 8px; color: ${corStatus}; font-weight: bold;">${txtStatus}</td>
-                </tr>
-            `;
-        });
-
-        html += `</tbody></table></div></div>`;
-        painelAuditoria.innerHTML = html;
-
-    } catch (erro) {
-        painelAuditoria.innerHTML = `<p class="erro">❌ Falha ao carregar auditoria: ${erro.message}. Lembre-se de rodar o arquivo de correção do banco de dados.</p>`;
-    }
-}
-
-// ==========================================
-// 6. DESENHO DA ROTA NO MAPA
-// ==========================================
 async function carregarRota() {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
@@ -128,28 +36,41 @@ async function carregarRota() {
         return;
     }
 
-    botao.textContent = "⏳ Processando...";
+    botao.textContent = "⏳ Carregando Trajeto...";
     botao.disabled = true;
-    infoDiv.style.display = "none";
-
+    infoDiv.innerHTML = "<p>Buscando informações da rota...</p>";
+    infoDiv.style.display = "block";
     isForaDaRota = false;
 
-    // Dispara a auditoria na nossa API sem depender do mapa
-    carregarAuditoriaOperacional(numLinha);
+    // 1. Busca apenas o Nome Oficial da Rota na sua API do Vercel
+    let nomeDaRota = "Nome da rota não encontrado";
+    try {
+        const resNome = await fetch(API_NOMES);
+        const dadosNome = await resNome.json();
+        const info = dadosNome.viagens.find(v => v.id_linha == numLinha);
+        if (info) {
+            nomeDaRota = info.nome_linha;
+        }
+    } catch (e) {
+        console.log("Erro ao buscar nome da rota no Supabase.");
+    }
 
-    // Se o usuário ainda não colocou o link do itinerário, avisa mas não quebra o sistema
+    // 2. Avisa caso o link do trajeto ainda não tenha sido colocado
     if (API_ITINERARIO === "COLOQUE_SEU_LINK_AQUI") {
-        infoDiv.innerHTML = `<p class="aviso">⚠️ Tabela de operação carregada! Para desenhar a linha azul no mapa, insira a URL correta do itinerário no código JavaScript.</p>`;
-        infoDiv.style.display = "block";
-        botao.textContent = "🚀 Carregar Rota";
+        infoDiv.innerHTML = `
+            <h3 style="color:#003366; margin: 0;">🚌 Linha ${numLinha}</h3>
+            <p style="font-size: 16px; font-weight: bold; margin: 5px 0;">${nomeDaRota}</p>
+            <p class="erro" style="margin-top: 10px;">⚠️ Adicione o link da API de coordenadas no código para desenhar o trajeto.</p>
+        `;
+        botao.textContent = "🚀 Carregar e Desenhar Rota";
         botao.disabled = false;
         return;
     }
 
+    // 3. Busca as Coordenadas e Desenha o Trajeto no Mapa
     try {
-        // Requisição direta (sem proxies problemáticos)
         const resposta = await fetch(API_ITINERARIO + numLinha);
-        if (!resposta.ok) throw new Error("Erro ao buscar coordenadas da rota.");
+        if (!resposta.ok) throw new Error("Erro ao buscar coordenadas.");
         
         const dados = await resposta.json();
         const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
@@ -159,9 +80,7 @@ async function carregarRota() {
         );
 
         if (pontosFiltrados.length === 0) {
-            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para o sentido ${sentido}.</p>`;
-            infoDiv.style.display = "block";
-            return;
+            throw new Error(`Nenhum ponto encontrado para o sentido ${sentido}.`);
         }
 
         const coordenadas = pontosFiltrados.map(ponto => [parseFloat(ponto.latitude), parseFloat(ponto.longitude)]);
@@ -171,21 +90,25 @@ async function carregarRota() {
         rotaDesenhada = L.polyline(coordenadas, { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
         map.fitBounds(rotaDesenhada.getBounds(), { padding: [20, 20] });
 
-        infoDiv.innerHTML = `<h3>Linha ${numLinha}</h3><p class="aviso">✅ Rota desenhada com sucesso.</p>`;
-        infoDiv.style.display = "block";
+        // Exibe o painel limpo com Linha, Nome e Confirmação do Trajeto
+        infoDiv.innerHTML = `
+            <h3 style="color:#003366; margin: 0; font-size: 22px;">🚌 Linha ${numLinha}</h3>
+            <p style="font-size: 16px; font-weight: bold; color: #333; margin: 5px 0;">${nomeDaRota}</p>
+            <p class="aviso" style="margin-top: 10px;">✅ Trajeto desenhado no mapa.</p>
+        `;
 
     } catch (erro) {
-        infoDiv.innerHTML = `<p class="erro">❌ Erro no mapa: ${erro.message}</p>`;
-        infoDiv.style.display = "block";
+        infoDiv.innerHTML = `
+            <h3 style="color:#003366; margin: 0;">🚌 Linha ${numLinha}</h3>
+            <p style="font-size: 16px; font-weight: bold; margin: 5px 0;">${nomeDaRota}</p>
+            <p class="erro" style="margin-top: 10px;">❌ Erro no trajeto: ${erro.message}</p>
+        `;
     } finally {
-        botao.textContent = "🚀 Carregar Rota";
+        botao.textContent = "🚀 Carregar e Desenhar Rota";
         botao.disabled = false;
     }
 }
 
-// ==========================================
-// 7. RASTREAMENTO GPS (USUÁRIO)
-// ==========================================
 function localizarUsuario() {
     const infoLocal = document.getElementById("localizacaoInfo");
     const botao = document.getElementById("btnLocalizar");
@@ -265,9 +188,6 @@ function localizarUsuario() {
     );
 }
 
-// ==========================================
-// 8. EVENTOS INICIAIS
-// ==========================================
 window.onload = () => {
     inicializarMapa();
     document.getElementById("btnCarregar").addEventListener("click", carregarRota);
