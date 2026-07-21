@@ -13,7 +13,7 @@
 
         <div class="card">
             <label for="linha">Número da Linha:</label>
-            <input type="number" id="linha" placeholder="Ex: 11, 27, 14, 24..." value="24">
+            <input type="number" id="linha" placeholder="Ex: 11, 27, 4, 13..." value="27">
             <p class="aviso">Digite o número e escolha o sentido</p>
         </div>
 
@@ -23,7 +23,9 @@
                 <option value="Ida">Ida</option>
                 <option value="Volta">Volta</option>
             </select>
-            <button id="btnCarregar">🚀 Carregar e Desenhar Rota</button>
+            
+            <button id="btnCarregar">🚀 Carregar Rota (Usa o celular se já salvo)</button>
+            <button id="btnAtualizar" style="background:#64748b; margin-top: 8px;">🔄 Baixar rota atualizada da Internet</button>
             
             <div class="controle-voz">
                 <label style="margin: 0; display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer;">
@@ -35,11 +37,8 @@
             <button id="btnLocalizar" style="background:#16a34a;">📍 Iniciar Rastreamento</button>
         </div>
 
-        <!-- Caixa Limpa para exibir apenas Linha, Nome e Status do Mapa -->
-        <div id="infoRota" class="card" style="display:none; text-align: center;"></div>
+        <div id="infoRota" class="card" style="display:none;"></div>
         <div id="localizacaoInfo" class="card" style="display:none;"></div>
-
-        <!-- Mapa -->
         <div id="map"></div>
     </div>
 
