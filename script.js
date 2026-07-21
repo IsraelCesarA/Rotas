@@ -1,13 +1,11 @@
-// Link base para puxar as coordenadas (lat/lng)
-// O número da linha será adicionado automaticamente no final pela função carregarRota()
-const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/"; 
-
-// Link da sua API no Vercel (usada apenas para pegar o NOME da rota)
-const API_NOMES = "https://api-transporte-rose.vercel.app/api/programacao/dia/2026-07-13";
-
+const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/";
 let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
+
 let isForaDaRota = false;
 const LIMITE_DISTANCIA_METROS = 60; 
+
+const MAX_TENTATIVAS = 6;
+const TEMPO_ESPERA = 1200; 
 
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
@@ -27,10 +25,33 @@ function falar(texto) {
     window.speechSynthesis.speak(voz);
 }
 
-async function carregarRota() {
+async function buscarComTentativas(url, tentativa = 1) {
+    try {
+        const resposta = await fetch(url);
+        if (!resposta.ok) throw new Error(`Erro HTTP: ${resposta.status}`);
+        
+        const jsonAllOrigins = await resposta.json();
+        try {
+            return JSON.parse(jsonAllOrigins.contents);
+        } catch (e) {
+            throw new Error("A API não retornou um JSON válido.");
+        }
+    } catch (erro) {
+        if (tentativa < MAX_TENTATIVAS) {
+            console.log(`Tentativa ${tentativa} falhou, tentando novamente...`);
+            await new Promise(resolve => setTimeout(resolve, TEMPO_ESPERA));
+            return buscarComTentativas(url, tentativa + 1);
+        }
+        throw new Error(`Falhou após ${MAX_TENTATIVAS} tentativas de acesso à rede.`);
+    }
+}
+
+// O parâmetro "forcarInternet" decide se vai olhar no cache ou se vai ignorar e baixar de novo
+async function carregarRota(forcarInternet = false) {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
-    const botao = document.getElementById("btnCarregar");
+    const botaoC = document.getElementById("btnCarregar");
+    const botaoA = document.getElementById("btnAtualizar");
     const infoDiv = document.getElementById("infoRota");
 
     if (!numLinha) {
@@ -38,41 +59,50 @@ async function carregarRota() {
         return;
     }
 
-    botao.textContent = "⏳ Carregando Trajeto...";
-    botao.disabled = true;
-    infoDiv.innerHTML = "<p>Buscando informações da rota...</p>";
-    infoDiv.style.display = "block";
+    botaoC.disabled = true;
+    botaoA.disabled = true;
+    infoDiv.style.display = "none";
+    infoDiv.className = "card";
     isForaDaRota = false;
 
-    // 1. Busca apenas o Nome Oficial da Rota na sua API do Vercel
-    let nomeDaRota = "Nome da rota não encontrado";
-    try {
-        const resNome = await fetch(API_NOMES);
-        const dadosNome = await resNome.json();
-        const info = dadosNome.viagens.find(v => v.id_linha == numLinha);
-        if (info) {
-            nomeDaRota = info.nome_linha;
-        }
-    } catch (e) {
-        console.log("Erro ao buscar nome da rota no Supabase.");
-    }
+    // Chave única para salvar essa linha no celular
+    const chaveCache = `rota_frotas_${numLinha}`;
+    let dados;
+    let mensagemOrigem = "";
 
-    // 2. Avisa caso o link do trajeto ainda não tenha sido colocado (Removido, pois a API já foi inserida)
-    
-    // 3. Busca as Coordenadas e Desenha o Trajeto no Mapa
     try {
-        const resposta = await fetch(API_ITINERARIO + numLinha);
-        if (!resposta.ok) throw new Error("Erro ao buscar coordenadas.");
-        
-        const dados = await resposta.json();
+        const cacheSalvo = localStorage.getItem(chaveCache);
+
+        // LÓGICA DE CACHE: Tem no celular e NÃO é para forçar o download?
+        if (cacheSalvo && !forcarInternet) {
+            console.log("Carregando rota direto da memória do telefone...");
+            dados = JSON.parse(cacheSalvo);
+            mensagemOrigem = `<p class="aviso" style="color:#0284c7;">⚡ Rota carregada rapidamente da memória do celular.</p>`;
+        } else {
+            console.log("Baixando da internet...");
+            if (forcarInternet) botaoA.textContent = "⏳ Baixando...";
+            else botaoC.textContent = "⏳ Baixando da internet...";
+
+            const urlProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
+            dados = await buscarComTentativas(urlProxy);
+            
+            // Salva os dados baixados no armazenamento do telefone para as próximas vezes
+            localStorage.setItem(chaveCache, JSON.stringify(dados));
+            mensagemOrigem = `<p class="aviso" style="color:#16a34a;">🌐 Rota baixada da API e agora está salva neste celular.</p>`;
+        }
+
         const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
+
+        if (!Array.isArray(listaPontos)) throw new Error("Formato inválido retornado pela API.");
 
         const pontosFiltrados = listaPontos.filter(ponto => 
             ponto.sentido && ponto.sentido.toLowerCase() === sentido.toLowerCase()
         );
 
         if (pontosFiltrados.length === 0) {
-            throw new Error(`Nenhum ponto encontrado para o sentido ${sentido}.`);
+            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para o sentido ${sentido}. Se tiver certeza que existe, clique em 'Baixar rota atualizada da Internet'.</p>`;
+            infoDiv.style.display = "block";
+            return;
         }
 
         const coordenadas = pontosFiltrados.map(ponto => [parseFloat(ponto.latitude), parseFloat(ponto.longitude)]);
@@ -82,22 +112,21 @@ async function carregarRota() {
         rotaDesenhada = L.polyline(coordenadas, { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
         map.fitBounds(rotaDesenhada.getBounds(), { padding: [20, 20] });
 
-        // Exibe o painel limpo com Linha, Nome e Confirmação do Trajeto
         infoDiv.innerHTML = `
-            <h3 style="color:#003366; margin: 0; font-size: 22px;">🚌 Linha ${numLinha}</h3>
-            <p style="font-size: 16px; font-weight: bold; color: #333; margin: 5px 0;">${nomeDaRota}</p>
-            <p class="aviso" style="margin-top: 10px;">✅ Trajeto desenhado no mapa.</p>
+            <h3>Linha ${numLinha} - Sentido ${sentido}</h3>
+            ${mensagemOrigem}
+            <p>Pontos da rota mapeados: ${pontosFiltrados.length}</p>
         `;
+        infoDiv.style.display = "block";
 
     } catch (erro) {
-        infoDiv.innerHTML = `
-            <h3 style="color:#003366; margin: 0;">🚌 Linha ${numLinha}</h3>
-            <p style="font-size: 16px; font-weight: bold; margin: 5px 0;">${nomeDaRota}</p>
-            <p class="erro" style="margin-top: 10px;">❌ Erro no trajeto: ${erro.message}</p>
-        `;
+        infoDiv.innerHTML = `<p class="erro">❌ Erro: ${erro.message}</p>`;
+        infoDiv.style.display = "block";
     } finally {
-        botao.textContent = "🚀 Carregar e Desenhar Rota";
-        botao.disabled = false;
+        botaoC.textContent = "🚀 Carregar Rota (Usa o celular se já salvo)";
+        botaoA.textContent = "🔄 Baixar rota atualizada da Internet";
+        botaoC.disabled = false;
+        botaoA.disabled = false;
     }
 }
 
@@ -136,11 +165,15 @@ function localizarUsuario() {
             if (marcadorUsuario) {
                 marcadorUsuario.setLatLng(latLngAtual);
             } else {
-                marcadorUsuario = L.marker(latLngAtual).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
+                marcadorUsuario = L.marker(latLngAtual, {
+                    icon: L.icon({
+                        iconUrl: 'https://cdn-icons-png.flaticon.com/32/149/149060.png',
+                        iconSize: [32, 32], iconAnchor: [16, 32]
+                    })
+                }).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
             }
 
             map.setView(latLngAtual, 16);
-
             let statusRotaHtml = "";
 
             if (rotaDesenhada) {
@@ -165,11 +198,14 @@ function localizarUsuario() {
                     : `<br><strong style="color:#16a34a;">✅ Na rota correta</strong>`;
             }
 
-            infoLocal.innerHTML = `<p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>Precisão: ~${precisao} metros ${statusRotaHtml}</p>`;
+            infoLocal.innerHTML = `
+                <p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>
+                Precisão: ~${precisao} metros ${statusRotaHtml}</p>
+            `;
             infoLocal.style.display = "block";
         },
         (erro) => {
-            infoLocal.innerHTML = `<p class="erro">⚠️ Erro de GPS.</p>`;
+            infoLocal.innerHTML = `<p class="erro">⚠️ Sinal de GPS fraco ou permissão negada.</p>`;
             infoLocal.style.display = "block";
             navigator.geolocation.clearWatch(watchId);
             watchId = null;
@@ -182,6 +218,11 @@ function localizarUsuario() {
 
 window.onload = () => {
     inicializarMapa();
-    document.getElementById("btnCarregar").addEventListener("click", carregarRota);
+    // O botão principal carrega o cache se existir
+    document.getElementById("btnCarregar").addEventListener("click", () => carregarRota(false));
+    
+    // O botão secundário força o download da internet
+    document.getElementById("btnAtualizar").addEventListener("click", () => carregarRota(true));
+    
     document.getElementById("btnLocalizar").addEventListener("click", localizarUsuario);
 };
