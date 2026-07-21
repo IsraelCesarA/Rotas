@@ -7,6 +7,8 @@ const LIMITE_DISTANCIA_METROS = 60;
 const MAX_TENTATIVAS = 6;
 const TEMPO_ESPERA = 1200; 
 
+let wakeLock = null; // Variável global para guardar o bloqueio de tela
+
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -46,7 +48,6 @@ async function buscarComTentativas(url, tentativa = 1) {
     }
 }
 
-// O parâmetro "forcarInternet" decide se vai olhar no cache ou se vai ignorar e baixar de novo
 async function carregarRota(forcarInternet = false) {
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
@@ -73,7 +74,7 @@ async function carregarRota(forcarInternet = false) {
     try {
         const cacheSalvo = localStorage.getItem(chaveCache);
 
-        // LÓGICA DE CACHE: Tem no celular e NÃO é para forçar o download?
+        // LÓGICA DE CACHE
         if (cacheSalvo && !forcarInternet) {
             console.log("Carregando rota direto da memória do telefone...");
             dados = JSON.parse(cacheSalvo);
@@ -86,7 +87,7 @@ async function carregarRota(forcarInternet = false) {
             const urlProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
             dados = await buscarComTentativas(urlProxy);
             
-            // Salva os dados baixados no armazenamento do telefone para as próximas vezes
+            // Salva os dados baixados no armazenamento do telefone
             localStorage.setItem(chaveCache, JSON.stringify(dados));
             mensagemOrigem = `<p class="aviso" style="color:#16a34a;">🌐 Rota baixada da API e agora está salva neste celular.</p>`;
         }
@@ -130,9 +131,28 @@ async function carregarRota(forcarInternet = false) {
     }
 }
 
+// Função para manter a tela do celular acesa
+async function controlarTela(manterAcesa) {
+    if ('wakeLock' in navigator) {
+        try {
+            if (manterAcesa) {
+                wakeLock = await navigator.wakeLock.request('screen');
+                console.log('Tela mantida acesa.');
+            } else if (wakeLock) {
+                await wakeLock.release();
+                wakeLock = null;
+                console.log('Bloqueio de tela liberado.');
+            }
+        } catch (err) {
+            console.error(`Erro no Wake Lock: ${err.name}, ${err.message}`);
+        }
+    }
+}
+
 function localizarUsuario() {
     const infoLocal = document.getElementById("localizacaoInfo");
     const botao = document.getElementById("btnLocalizar");
+    const checkboxNavegacao = document.getElementById("modoNavegacao");
 
     if (!navigator.geolocation) {
         infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado.</p>`;
@@ -140,6 +160,7 @@ function localizarUsuario() {
         return;
     }
 
+    // Se já estiver rastreando, vamos PARAR
     if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
@@ -147,13 +168,19 @@ function localizarUsuario() {
         botao.style.background = "#16a34a";
         infoLocal.innerHTML += `<p class="aviso">🛑 Rastreamento pausado.</p>`;
         falar("Rastreamento pausado.");
+        controlarTela(false); // Libera a tela
         return;
     }
 
+    // INICIAR Rastreamento
     botao.textContent = "🔄 Rastreando... (Clique para Parar)";
     botao.style.background = "#d97706"; 
     infoLocal.style.display = "none";
     falar("Rastreamento iniciado.");
+    
+    if (checkboxNavegacao.checked) controlarTela(true); // Acende a tela se o modo estiver ativo
+
+    let primeiraVez = true;
 
     watchId = navigator.geolocation.watchPosition(
         (posicao) => {
@@ -161,6 +188,7 @@ function localizarUsuario() {
             const lng = posicao.coords.longitude;
             const precisao = (posicao.coords.accuracy / 1000).toFixed(2);
             const latLngAtual = L.latLng(lat, lng);
+            const modoNavegacaoAtivo = checkboxNavegacao.checked;
 
             if (marcadorUsuario) {
                 marcadorUsuario.setLatLng(latLngAtual);
@@ -173,7 +201,14 @@ function localizarUsuario() {
                 }).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
             }
 
-            map.setView(latLngAtual, 16);
+            // Lógica da Câmera do Mapa
+            if (primeiraVez) {
+                map.setView(latLngAtual, 16); // Centraliza na primeira vez que acha o GPS
+                primeiraVez = false;
+            } else if (modoNavegacaoAtivo) {
+                map.setView(latLngAtual, 18); // Fica seguindo o usuário bem de perto
+            }
+
             let statusRotaHtml = "";
 
             if (rotaDesenhada) {
@@ -211,6 +246,7 @@ function localizarUsuario() {
             watchId = null;
             botao.textContent = "📍 Iniciar Rastreamento";
             botao.style.background = "#16a34a";
+            controlarTela(false);
         },
         { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
@@ -218,6 +254,7 @@ function localizarUsuario() {
 
 window.onload = () => {
     inicializarMapa();
+    
     // O botão principal carrega o cache se existir
     document.getElementById("btnCarregar").addEventListener("click", () => carregarRota(false));
     
@@ -225,4 +262,16 @@ window.onload = () => {
     document.getElementById("btnAtualizar").addEventListener("click", () => carregarRota(true));
     
     document.getElementById("btnLocalizar").addEventListener("click", localizarUsuario);
+    
+    // Monitora se o usuário ativou/desativou a navegação no meio da viagem
+    document.getElementById("modoNavegacao").addEventListener("change", (e) => {
+        if (watchId !== null) { // Só altera o bloqueio de tela se o GPS estiver rodando
+            controlarTela(e.target.checked);
+            
+            // Se ativou e já temos a localização, dá um zoom imediato
+            if (e.target.checked && marcadorUsuario) {
+                map.setView(marcadorUsuario.getLatLng(), 18);
+            }
+        }
+    });
 };
