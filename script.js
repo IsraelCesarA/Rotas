@@ -1,5 +1,7 @@
-// Link para puxar as coordenadas (lat/lng)
-const API_ITINERARIO = "COLOQUE_SEU_LINK_AQUI"; 
+// Link base para puxar as coordenadas (lat/lng)
+// O número da linha será adicionado automaticamente no final pela função carregarRota()
+const API_ITINERARIO = "https://info-bus-fortaleza.vercel.app/api/pontos-itinerarios/"; 
+
 // Link da sua API no Vercel (usada apenas para pegar o NOME da rota)
 const API_NOMES = "https://api-transporte-rose.vercel.app/api/programacao/dia/2026-07-13";
 
@@ -55,18 +57,8 @@ async function carregarRota() {
         console.log("Erro ao buscar nome da rota no Supabase.");
     }
 
-    // 2. Avisa caso o link do trajeto ainda não tenha sido colocado
-    if (API_ITINERARIO === "COLOQUE_SEU_LINK_AQUI") {
-        infoDiv.innerHTML = `
-            <h3 style="color:#003366; margin: 0;">🚌 Linha ${numLinha}</h3>
-            <p style="font-size: 16px; font-weight: bold; margin: 5px 0;">${nomeDaRota}</p>
-            <p class="erro" style="margin-top: 10px;">⚠️ Adicione o link da API de coordenadas no código para desenhar o trajeto.</p>
-        `;
-        botao.textContent = "🚀 Carregar e Desenhar Rota";
-        botao.disabled = false;
-        return;
-    }
-
+    // 2. Avisa caso o link do trajeto ainda não tenha sido colocado (Removido, pois a API já foi inserida)
+    
     // 3. Busca as Coordenadas e Desenha o Trajeto no Mapa
     try {
         const resposta = await fetch(API_ITINERARIO + numLinha);
