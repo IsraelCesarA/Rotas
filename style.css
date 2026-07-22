@@ -5,6 +5,10 @@
     font-family: Arial, sans-serif; 
 }
 
+html, body {
+    min-height: 100vh;
+}
+
 body { 
     padding: 12px; 
     background: #f8fafc; 
@@ -47,11 +51,11 @@ input[type="number"], select {
 }
 
 .controle-voz {
-    margin-top: 16px;
-    padding: 12px;
-    background: #f1f5f9;
-    border-radius: 6px;
-    border: 1px solid #e2e8f0;
+    margin-top: 16px; 
+    padding: 12px; 
+    background: #f1f5f9; 
+    border-radius: 6px; 
+    border: 1px solid #e2e8f0; 
 }
 
 button { 
@@ -64,8 +68,8 @@ button {
     font-weight: bold; 
     cursor: pointer; 
     margin-top: 12px; 
-    transition: background 0.2s; 
     font-size: 16px; 
+    transition: background 0.2s; 
 }
 
 button:hover { 
@@ -77,38 +81,59 @@ button:disabled {
     cursor: not-allowed; 
 }
 
+/* MAPA - GARANTINDO ALTURA E POSIÇÃO */
 #map { 
     height: 55vh; 
+    min-height: 300px;
     border-radius: 8px; 
     margin-bottom: 16px; 
     z-index: 1; 
+    position: relative;
+    background-color: #e2e8f0;
 }
 
-#infoRota, #localizacaoInfo { 
-    padding: 12px; 
-    border-radius: 4px; 
-    display: none; 
-    margin-top: 12px; 
+#map:fullscreen { 
+    height: 100vh; 
+    min-height: 100vh;
+    border-radius: 0; 
+    margin: 0; 
 }
+
+/* BOTÃO FLUTUANTE DENTRO DO MAPA */
+.btn-sair-tela {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: auto;
+    padding: 8px 16px;
+    background: #dc2626;
+    color: white;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: bold;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    z-index: 9999;
+}
+.btn-sair-tela:hover { background: #b91c1c; }
 
 #infoRota {
     background: #dbeafe; 
     border-left: 4px solid #2563eb; 
 }
 
-.aviso { 
-    font-size: 14px; 
-    color: #475569; 
-    margin-top: 8px; 
-}
-
-.localizacao { 
+#localizacaoInfo { 
     background: #ecfccb; 
     border-left: 4px solid #65a30d; 
     padding: 10px; 
     border-radius: 4px; 
     margin-top: 10px; 
     font-size: 14px; 
+}
+
+.aviso { 
+    font-size: 14px; 
+    color: #475569; 
+    margin-top: 8px; 
 }
 
 .erro { 
