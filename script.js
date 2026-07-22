@@ -8,7 +8,21 @@ const TEMPO_ESPERA = 1000;
 let wakeLock = null;
 
 
-// 🔄 FUNÇÃO AJUSTADA: TRATA DIFERENTES FORMATOS DE RETORNO
+// ✅ Inicializa o mapa logo no início
+function inicializarMapa() {
+    try {
+        map = L.map('map').setView([-3.7319, -38.5267], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+        console.log("✅ Mapa inicializado com sucesso");
+    } catch (e) {
+        console.error("❌ Erro ao inicializar mapa:", e);
+    }
+}
+
+
+// 🔄 Trata diferentes formatos de retorno da API
 async function buscarComTentativas(url, tentativa = 1) {
     try {
         const resposta = await fetch(url);
@@ -19,19 +33,16 @@ async function buscarComTentativas(url, tentativa = 1) {
 
         try {
             const json = JSON.parse(texto);
-            // Se vier do allorigins: extrai o conteúdo real
+            // Se vier do proxy allorigins
             if (json.contents) {
-                try {
-                    dados = JSON.parse(json.contents);
-                } catch {
-                    dados = json.contents;
-                }
+                try { dados = JSON.parse(json.contents); } 
+                catch { dados = json.contents; }
             } else {
-                // Se vier direto da API
+                // Se vier direto o array da API
                 dados = json;
             }
 
-            // 🚀 Normaliza: pega o array real independente da estrutura
+            // Normaliza para pegar o array real
             if (Array.isArray(dados)) return dados;
             if (Array.isArray(dados?.data)) return dados.data;
             if (Array.isArray(dados?.itinerario)) return dados.itinerario;
@@ -40,7 +51,7 @@ async function buscarComTentativas(url, tentativa = 1) {
             throw new Error("Formato de dados não reconhecido");
 
         } catch (erroParse) {
-            throw new Error("A API não retornou um conteúdo válido.");
+            throw new Error("Conteúdo inválido recebido");
         }
 
     } catch (erro) {
@@ -56,7 +67,7 @@ async function buscarComTentativas(url, tentativa = 1) {
 
 function alternarTelaCheia() {
     const elem = document.getElementById('map');
-    if (!document.fullscreenElement) elem.requestFullscreen().catch(err => alert(`Erro: ${err.message}`));
+    if (!document.fullscreenElement) elem.requestFullscreen().catch(err => console.log("Tela cheia:", err));
     else document.exitFullscreen();
 }
 
@@ -79,13 +90,6 @@ document.getElementById('btnSairTela').addEventListener('click', () => {
 });
 
 
-function inicializarMapa() {
-    map = L.map('map').setView([-3.7319, -38.5267], 12);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap'
-    }).addTo(map);
-}
-
 function falar(texto) {
     const checkboxVoz = document.getElementById("vozAtiva");
     if (!checkboxVoz || !checkboxVoz.checked) return;
@@ -98,16 +102,15 @@ function falar(texto) {
 
 
 async function carregarRota(forcarInternet = false) {
+    if (!map) { alert("Mapa ainda não carregado, aguarde um instante"); return; }
+
     const numLinha = document.getElementById("linha").value.trim();
     const sentido = document.getElementById("sentido").value;
     const botaoC = document.getElementById("btnCarregar");
     const botaoA = document.getElementById("btnAtualizar");
     const infoDiv = document.getElementById("infoRota");
 
-    if (!numLinha) {
-        alert("⚠️ Digite o número da linha!");
-        return;
-    }
+    if (!numLinha) { alert("⚠️ Digite o número da linha!"); return; }
 
     botaoC.disabled = true;
     botaoA.disabled = true;
@@ -115,7 +118,7 @@ async function carregarRota(forcarInternet = false) {
     infoDiv.className = "card";
     isForaDaRota = false;
 
-    const chaveCache = `rota_frotas_${numLinha}_${sentido}`; // Cache separado por sentido também
+    const chaveCache = `rota_frotas_${numLinha}_${sentido}`;
     let dados, mensagemOrigem = "";
 
     try {
@@ -128,29 +131,26 @@ async function carregarRota(forcarInternet = false) {
             if (forcarInternet) botaoA.textContent = "⏳ Baixando...";
             else botaoC.textContent = "⏳ Consultando rota...";
 
-            // Tenta primeiro direto na API, se der erro usa o proxy
-            let url;
+            // Tenta direto primeiro, usa proxy se precisar
             try {
-                url = API_ITINERARIO + numLinha;
-                dados = await buscarComTentativas(url);
+                dados = await buscarComTentativas(API_ITINERARIO + numLinha);
             } catch {
-                console.log("Usando proxy para contornar restrições...");
-                url = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
-                dados = await buscarComTentativas(url);
+                console.log("Usando proxy...");
+                dados = await buscarComTentativas(`https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`);
             }
 
             localStorage.setItem(chaveCache, JSON.stringify(dados));
             mensagemOrigem = `<p class="aviso" style="color:#16a34a;">🌐 Rota baixada e salva no celular</p>`;
         }
 
-        // ✅ FILTRO AJUSTADO AO FORMATO QUE VOCÊ MOSTROU
+        // Filtro adaptado exatamente ao formato que você enviou
         const pontosFiltrados = dados.filter(ponto => {
             if (!ponto.latitude || !ponto.longitude || !ponto.sentido) return false;
             return ponto.sentido.trim().toLowerCase() === sentido.trim().toLowerCase();
         });
 
         if (pontosFiltrados.length === 0) {
-            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para linha ${numLinha} - ${sentido}. Clique em "Baixar atualizada" se tiver certeza que existe.</p>`;
+            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para linha ${numLinha} - ${sentido}.</p>`;
             infoDiv.style.display = "block";
             return;
         }
@@ -172,9 +172,9 @@ async function carregarRota(forcarInternet = false) {
         infoDiv.style.display = "block";
 
     } catch (erro) {
-        infoDiv.innerHTML = `<p class="erro">❌ Erro: ${erro.message}<br>Tente novamente ou clique em baixar atualizada.</p>`;
+        infoDiv.innerHTML = `<p class="erro">❌ Erro: ${erro.message}</p>`;
         infoDiv.style.display = "block";
-        console.log("Detalhes do erro:", erro);
+        console.error("Detalhes:", erro);
     } finally {
         botaoC.textContent = "🚀 Carregar Rota";
         botaoA.textContent = "🔄 Baixar rota atualizada";
@@ -194,12 +194,14 @@ async function controlarTela(manterAcesa) {
 
 
 function localizarUsuario() {
+    if (!map) { alert("Mapa ainda não carregado"); return; }
+
     const infoLocal = document.getElementById("localizacaoInfo");
     const botao = document.getElementById("btnLocalizar");
     const checkboxNavegacao = document.getElementById("modoNavegacao");
 
     if (!navigator.geolocation) {
-        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado no aparelho.</p>`;
+        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado.</p>`;
         infoLocal.style.display = "block";
         return;
     }
@@ -215,7 +217,7 @@ function localizarUsuario() {
         return;
     }
 
-    botao.textContent = "🔄 Rastreando... (Clique para Parar)";
+    botao.textContent = "🔄 Rastreando...";
     botao.style.background = "#d97706"; 
     infoLocal.style.display = "none";
     falar("Rastreamento iniciado.");
@@ -274,6 +276,7 @@ function localizarUsuario() {
 
 window.onload = () => {
     inicializarMapa();
+    
     document.getElementById("btnCarregar").addEventListener("click", () => carregarRota(false));
     document.getElementById("btnAtualizar").addEventListener("click", () => carregarRota(true));
     document.getElementById("btnLocalizar").addEventListener("click", localizarUsuario);
