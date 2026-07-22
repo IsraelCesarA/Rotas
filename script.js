@@ -3,11 +3,81 @@ let map, rotaDesenhada = null, marcadorUsuario = null, watchId = null;
 
 let isForaDaRota = false;
 const LIMITE_DISTANCIA_METROS = 60; 
+const MAX_TENTATIVAS = 5;
+const TEMPO_ESPERA = 1000; 
+let wakeLock = null;
 
-const MAX_TENTATIVAS = 6;
-const TEMPO_ESPERA = 1200; 
 
-let wakeLock = null; // Variável global para guardar o bloqueio de tela
+// 🔄 FUNÇÃO AJUSTADA: TRATA DIFERENTES FORMATOS DE RETORNO
+async function buscarComTentativas(url, tentativa = 1) {
+    try {
+        const resposta = await fetch(url);
+        if (!resposta.ok) throw new Error(`Erro HTTP: ${resposta.status}`);
+        
+        const texto = await resposta.text();
+        let dados;
+
+        try {
+            const json = JSON.parse(texto);
+            // Se vier do allorigins: extrai o conteúdo real
+            if (json.contents) {
+                try {
+                    dados = JSON.parse(json.contents);
+                } catch {
+                    dados = json.contents;
+                }
+            } else {
+                // Se vier direto da API
+                dados = json;
+            }
+
+            // 🚀 Normaliza: pega o array real independente da estrutura
+            if (Array.isArray(dados)) return dados;
+            if (Array.isArray(dados?.data)) return dados.data;
+            if (Array.isArray(dados?.itinerario)) return dados.itinerario;
+            if (Array.isArray(dados?.pontos)) return dados.pontos;
+
+            throw new Error("Formato de dados não reconhecido");
+
+        } catch (erroParse) {
+            throw new Error("A API não retornou um conteúdo válido.");
+        }
+
+    } catch (erro) {
+        if (tentativa < MAX_TENTATIVAS) {
+            console.log(`Tentativa ${tentativa} falhou... tentando novamente`);
+            await new Promise(resolve => setTimeout(resolve, TEMPO_ESPERA));
+            return buscarComTentativas(url, tentativa + 1);
+        }
+        throw new Error(`Falhou após ${MAX_TENTATIVAS} tentativas: ${erro.message}`);
+    }
+}
+
+
+function alternarTelaCheia() {
+    const elem = document.getElementById('map');
+    if (!document.fullscreenElement) elem.requestFullscreen().catch(err => alert(`Erro: ${err.message}`));
+    else document.exitFullscreen();
+}
+
+document.addEventListener('fullscreenchange', () => {
+    const btnPrincipal = document.getElementById('btnTelaCheia');
+    const btnSair = document.getElementById('btnSairTela');
+    
+    if (document.fullscreenElement) {
+        btnPrincipal.textContent = "⛶ Sair da Tela Cheia";
+        btnSair.style.display = "block";
+    } else {
+        btnPrincipal.textContent = "⛶ Mapa em Tela Cheia";
+        btnSair.style.display = "none";
+    }
+    if (map) map.invalidateSize();
+});
+
+document.getElementById('btnSairTela').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+});
+
 
 function inicializarMapa() {
     map = L.map('map').setView([-3.7319, -38.5267], 12);
@@ -19,7 +89,6 @@ function inicializarMapa() {
 function falar(texto) {
     const checkboxVoz = document.getElementById("vozAtiva");
     if (!checkboxVoz || !checkboxVoz.checked) return;
-
     window.speechSynthesis.cancel();
     const voz = new SpeechSynthesisUtterance(texto);
     voz.lang = 'pt-BR';
@@ -27,26 +96,6 @@ function falar(texto) {
     window.speechSynthesis.speak(voz);
 }
 
-async function buscarComTentativas(url, tentativa = 1) {
-    try {
-        const resposta = await fetch(url);
-        if (!resposta.ok) throw new Error(`Erro HTTP: ${resposta.status}`);
-        
-        const jsonAllOrigins = await resposta.json();
-        try {
-            return JSON.parse(jsonAllOrigins.contents);
-        } catch (e) {
-            throw new Error("A API não retornou um JSON válido.");
-        }
-    } catch (erro) {
-        if (tentativa < MAX_TENTATIVAS) {
-            console.log(`Tentativa ${tentativa} falhou, tentando novamente...`);
-            await new Promise(resolve => setTimeout(resolve, TEMPO_ESPERA));
-            return buscarComTentativas(url, tentativa + 1);
-        }
-        throw new Error(`Falhou após ${MAX_TENTATIVAS} tentativas de acesso à rede.`);
-    }
-}
 
 async function carregarRota(forcarInternet = false) {
     const numLinha = document.getElementById("linha").value.trim();
@@ -66,88 +115,83 @@ async function carregarRota(forcarInternet = false) {
     infoDiv.className = "card";
     isForaDaRota = false;
 
-    // Chave única para salvar essa linha no celular
-    const chaveCache = `rota_frotas_${numLinha}`;
-    let dados;
-    let mensagemOrigem = "";
+    const chaveCache = `rota_frotas_${numLinha}_${sentido}`; // Cache separado por sentido também
+    let dados, mensagemOrigem = "";
 
     try {
         const cacheSalvo = localStorage.getItem(chaveCache);
 
-        // LÓGICA DE CACHE
         if (cacheSalvo && !forcarInternet) {
-            console.log("Carregando rota direto da memória do telefone...");
             dados = JSON.parse(cacheSalvo);
-            mensagemOrigem = `<p class="aviso" style="color:#0284c7;">⚡ Rota carregada rapidamente da memória do celular.</p>`;
+            mensagemOrigem = `<p class="aviso" style="color:#0284c7;">⚡ Rota carregada da memória do celular</p>`;
         } else {
-            console.log("Baixando da internet...");
             if (forcarInternet) botaoA.textContent = "⏳ Baixando...";
-            else botaoC.textContent = "⏳ Baixando da internet...";
+            else botaoC.textContent = "⏳ Consultando rota...";
 
-            const urlProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
-            dados = await buscarComTentativas(urlProxy);
-            
-            // Salva os dados baixados no armazenamento do telefone
+            // Tenta primeiro direto na API, se der erro usa o proxy
+            let url;
+            try {
+                url = API_ITINERARIO + numLinha;
+                dados = await buscarComTentativas(url);
+            } catch {
+                console.log("Usando proxy para contornar restrições...");
+                url = `https://api.allorigins.win/get?url=${encodeURIComponent(API_ITINERARIO + numLinha)}`;
+                dados = await buscarComTentativas(url);
+            }
+
             localStorage.setItem(chaveCache, JSON.stringify(dados));
-            mensagemOrigem = `<p class="aviso" style="color:#16a34a;">🌐 Rota baixada da API e agora está salva neste celular.</p>`;
+            mensagemOrigem = `<p class="aviso" style="color:#16a34a;">🌐 Rota baixada e salva no celular</p>`;
         }
 
-        const listaPontos = Array.isArray(dados) ? dados : (dados.data || dados.itinerario || dados.pontos || []);
-
-        if (!Array.isArray(listaPontos)) throw new Error("Formato inválido retornado pela API.");
-
-        const pontosFiltrados = listaPontos.filter(ponto => 
-            ponto.sentido && ponto.sentido.toLowerCase() === sentido.toLowerCase()
-        );
+        // ✅ FILTRO AJUSTADO AO FORMATO QUE VOCÊ MOSTROU
+        const pontosFiltrados = dados.filter(ponto => {
+            if (!ponto.latitude || !ponto.longitude || !ponto.sentido) return false;
+            return ponto.sentido.trim().toLowerCase() === sentido.trim().toLowerCase();
+        });
 
         if (pontosFiltrados.length === 0) {
-            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para o sentido ${sentido}. Se tiver certeza que existe, clique em 'Baixar rota atualizada da Internet'.</p>`;
+            infoDiv.innerHTML = `<p class="erro">ℹ️ Nenhum ponto encontrado para linha ${numLinha} - ${sentido}. Clique em "Baixar atualizada" se tiver certeza que existe.</p>`;
             infoDiv.style.display = "block";
             return;
         }
 
-        const coordenadas = pontosFiltrados.map(ponto => [parseFloat(ponto.latitude), parseFloat(ponto.longitude)]);
+        const coordenadas = pontosFiltrados.map(ponto => [
+            parseFloat(ponto.latitude), 
+            parseFloat(ponto.longitude)
+        ]);
 
         if (rotaDesenhada) map.removeLayer(rotaDesenhada);
-
         rotaDesenhada = L.polyline(coordenadas, { color: '#2563eb', weight: 5, opacity: 0.9 }).addTo(map);
-        map.fitBounds(rotaDesenhada.getBounds(), { padding: [20, 20] });
+        map.fitBounds(rotaDesenhada.getBounds(), { padding: [25, 25] });
 
         infoDiv.innerHTML = `
             <h3>Linha ${numLinha} - Sentido ${sentido}</h3>
             ${mensagemOrigem}
-            <p>Pontos da rota mapeados: ${pontosFiltrados.length}</p>
+            <p>Pontos mapeados: ${pontosFiltrados.length}</p>
         `;
         infoDiv.style.display = "block";
 
     } catch (erro) {
-        infoDiv.innerHTML = `<p class="erro">❌ Erro: ${erro.message}</p>`;
+        infoDiv.innerHTML = `<p class="erro">❌ Erro: ${erro.message}<br>Tente novamente ou clique em baixar atualizada.</p>`;
         infoDiv.style.display = "block";
+        console.log("Detalhes do erro:", erro);
     } finally {
-        botaoC.textContent = "🚀 Carregar Rota (Usa o celular se já salvo)";
-        botaoA.textContent = "🔄 Baixar rota atualizada da Internet";
-        botaoC.disabled = false;
-        botaoA.disabled = false;
+        botaoC.textContent = "🚀 Carregar Rota";
+        botaoA.textContent = "🔄 Baixar rota atualizada";
+        botaoC.disabled = botaoA.disabled = false;
     }
 }
 
-// Função para manter a tela do celular acesa
+
 async function controlarTela(manterAcesa) {
     if ('wakeLock' in navigator) {
         try {
-            if (manterAcesa) {
-                wakeLock = await navigator.wakeLock.request('screen');
-                console.log('Tela mantida acesa.');
-            } else if (wakeLock) {
-                await wakeLock.release();
-                wakeLock = null;
-                console.log('Bloqueio de tela liberado.');
-            }
-        } catch (err) {
-            console.error(`Erro no Wake Lock: ${err.name}, ${err.message}`);
-        }
+            if (manterAcesa) wakeLock = await navigator.wakeLock.request('screen');
+            else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+        } catch (err) { console.error("WakeLock:", err); }
     }
 }
+
 
 function localizarUsuario() {
     const infoLocal = document.getElementById("localizacaoInfo");
@@ -155,12 +199,11 @@ function localizarUsuario() {
     const checkboxNavegacao = document.getElementById("modoNavegacao");
 
     if (!navigator.geolocation) {
-        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado.</p>`;
+        infoLocal.innerHTML = `<p class="erro">❌ GPS não suportado no aparelho.</p>`;
         infoLocal.style.display = "block";
         return;
     }
 
-    // Se já estiver rastreando, vamos PARAR
     if (watchId !== null) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
@@ -168,81 +211,57 @@ function localizarUsuario() {
         botao.style.background = "#16a34a";
         infoLocal.innerHTML += `<p class="aviso">🛑 Rastreamento pausado.</p>`;
         falar("Rastreamento pausado.");
-        controlarTela(false); // Libera a tela
+        controlarTela(false);
         return;
     }
 
-    // INICIAR Rastreamento
     botao.textContent = "🔄 Rastreando... (Clique para Parar)";
     botao.style.background = "#d97706"; 
     infoLocal.style.display = "none";
     falar("Rastreamento iniciado.");
-    
-    if (checkboxNavegacao.checked) controlarTela(true); // Acende a tela se o modo estiver ativo
+    if (checkboxNavegacao.checked) controlarTela(true);
 
     let primeiraVez = true;
-
     watchId = navigator.geolocation.watchPosition(
-        (posicao) => {
-            const lat = posicao.coords.latitude;
-            const lng = posicao.coords.longitude;
-            const precisao = (posicao.coords.accuracy / 1000).toFixed(2);
-            const latLngAtual = L.latLng(lat, lng);
-            const modoNavegacaoAtivo = checkboxNavegacao.checked;
+        (pos) => {
+            const latLng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+            const precisao = (pos.coords.accuracy / 1000).toFixed(2);
 
-            if (marcadorUsuario) {
-                marcadorUsuario.setLatLng(latLngAtual);
-            } else {
-                marcadorUsuario = L.marker(latLngAtual, {
-                    icon: L.icon({
-                        iconUrl: 'https://cdn-icons-png.flaticon.com/32/149/149060.png',
-                        iconSize: [32, 32], iconAnchor: [16, 32]
-                    })
-                }).addTo(map).bindPopup(`<strong>Você está aqui</strong>`).openPopup();
-            }
+            if (marcadorUsuario) marcadorUsuario.setLatLng(latLng);
+            else marcadorUsuario = L.marker(latLng, {
+                icon: L.icon({
+                    iconUrl:'https://cdn-icons-png.flaticon.com/32/149/149060.png',
+                    iconSize:[32,32], iconAnchor:[16,32]
+                })
+            }).addTo(map).bindPopup(`<strong>Você está aqui</strong>`);
 
-            // Lógica da Câmera do Mapa
-            if (primeiraVez) {
-                map.setView(latLngAtual, 16); // Centraliza na primeira vez que acha o GPS
-                primeiraVez = false;
-            } else if (modoNavegacaoAtivo) {
-                map.setView(latLngAtual, 18); // Fica seguindo o usuário bem de perto
-            }
+            if (primeiraVez) { map.setView(latLng,16); primeiraVez=false; }
+            else if (checkboxNavegacao.checked) map.setView(latLng,18);
 
-            let statusRotaHtml = "";
-
+            let status = "";
             if (rotaDesenhada) {
-                const pontosRota = rotaDesenhada.getLatLngs();
-                let menorDistancia = Infinity;
+                const pontos = rotaDesenhada.getLatLngs();
+                let menor = Math.min(...pontos.map(p => latLng.distanceTo(p)));
 
-                for (let i = 0; i < pontosRota.length; i++) {
-                    let distanciaPonto = latLngAtual.distanceTo(pontosRota[i]);
-                    if (distanciaPonto < menorDistancia) menorDistancia = distanciaPonto;
-                }
-
-                if (menorDistancia > LIMITE_DISTANCIA_METROS && !isForaDaRota) {
+                if (menor > LIMITE_DISTANCIA_METROS && !isForaDaRota) {
                     isForaDaRota = true;
-                    falar("Atenção. Você saiu da rota da linha.");
-                } else if (menorDistancia <= LIMITE_DISTANCIA_METROS && isForaDaRota) {
+                    falar("Atenção! Você saiu da rota da linha.");
+                } else if (menor <= LIMITE_DISTANCIA_METROS && isForaDaRota) {
                     isForaDaRota = false;
                     falar("Você retornou à rota correta.");
                 }
 
-                statusRotaHtml = isForaDaRota 
-                    ? `<br><strong style="color:#dc2626;">⚠️ Fora da rota (${Math.round(menorDistancia)}m de distância)</strong>` 
+                status = isForaDaRota 
+                    ? `<br><strong style="color:#dc2626;">⚠️ Fora da rota (${Math.round(menor)}m)</strong>` 
                     : `<br><strong style="color:#16a34a;">✅ Na rota correta</strong>`;
             }
 
-            infoLocal.innerHTML = `
-                <p class="localizacao">📍 <strong>Rastreamento Ativo:</strong><br>
-                Precisão: ~${precisao} metros ${statusRotaHtml}</p>
-            `;
+            infoLocal.innerHTML = `<p class="localizacao">📍 Rastreamento Ativo<br>Precisão: ~${precisao} metros ${status}</p>`;
             infoLocal.style.display = "block";
         },
         (erro) => {
             infoLocal.innerHTML = `<p class="erro">⚠️ Sinal de GPS fraco ou permissão negada.</p>`;
             infoLocal.style.display = "block";
-            navigator.geolocation.clearWatch(watchId);
             watchId = null;
             botao.textContent = "📍 Iniciar Rastreamento";
             botao.style.background = "#16a34a";
@@ -252,26 +271,15 @@ function localizarUsuario() {
     );
 }
 
+
 window.onload = () => {
     inicializarMapa();
-    
-    // O botão principal carrega o cache se existir
     document.getElementById("btnCarregar").addEventListener("click", () => carregarRota(false));
-    
-    // O botão secundário força o download da internet
     document.getElementById("btnAtualizar").addEventListener("click", () => carregarRota(true));
-    
     document.getElementById("btnLocalizar").addEventListener("click", localizarUsuario);
-    
-    // Monitora se o usuário ativou/desativou a navegação no meio da viagem
-    document.getElementById("modoNavegacao").addEventListener("change", (e) => {
-        if (watchId !== null) { // Só altera o bloqueio de tela se o GPS estiver rodando
-            controlarTela(e.target.checked);
-            
-            // Se ativou e já temos a localização, dá um zoom imediato
-            if (e.target.checked && marcadorUsuario) {
-                map.setView(marcadorUsuario.getLatLng(), 18);
-            }
-        }
+    document.getElementById("btnTelaCheia").addEventListener("click", alternarTelaCheia);
+    document.getElementById("modoNavegacao").addEventListener("change", e => {
+        if (watchId) controlarTela(e.target.checked);
+        if (e.target.checked && marcadorUsuario) map.setView(marcadorUsuario.getLatLng(),18);
     });
 };
