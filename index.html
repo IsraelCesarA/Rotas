@@ -34,7 +34,6 @@
                 </label>
             </div>
 
-            <!-- Controle do Modo Navegação -->
             <div class="controle-voz" style="margin-top: 8px;">
                 <label style="margin: 0; display: flex; align-items: center; gap: 8px; font-weight: normal; cursor: pointer; color: #0369a1;">
                     <input type="checkbox" id="modoNavegacao" style="width: 20px; height: 20px;">
@@ -47,7 +46,13 @@
 
         <div id="infoRota" class="card" style="display:none;"></div>
         <div id="localizacaoInfo" class="card" style="display:none;"></div>
-        <div id="map"></div>
+
+        <button id="btnTelaCheia" style="background:#7c3aed; margin-bottom: 8px;">⛶ Mapa em Tela Cheia</button>
+        
+        <!-- MAPA COM BOTÃO FLUTUANTE -->
+        <div id="map">
+            <button id="btnSairTela" class="btn-sair-tela" style="display:none;">✕ Sair</button>
+        </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
